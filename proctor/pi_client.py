@@ -96,6 +96,10 @@ class RaspberryPiClient:
             logger.debug("Pi integration disabled. Skipping status transmission.")
             return True
 
+        if not timestamp:
+            from datetime import datetime, timezone
+            timestamp = datetime.now(timezone.utc).astimezone().isoformat()
+
         url = f"{self.base_url}/status"
         payload: Dict[str, Any] = {
             "status": status,

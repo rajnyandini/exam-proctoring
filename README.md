@@ -270,9 +270,44 @@ tests/test_pi_agent.py::test_pi_client_offline_graceful_handling PASSED  [100%]
 
 ---
 
-## 7. Raspberry Pi 3 Model B Setup & Electrical Safety
+## 7. Raspberry Pi 3 Model B Setup, Live Dashboard, & Hotspot Networking
 
-The Raspberry Pi agent is located in `pi_agent/`. It runs an authenticated Flask server that receives proctoring events and actuates an optional visual status servo.
+The Raspberry Pi agent is located in `pi_agent/`. It runs an authenticated Flask server that receives proctoring events, hosts a dedicated **Live Status Dashboard** on port 5050, and actuates an optional visual status servo.
+
+### Mobile Hotspot Configuration (Same LAN)
+When your MacBook and Raspberry Pi are both connected to the same mobile hotspot:
+
+1. **Find Pi's IP address on the hotspot**:
+   On the Raspberry Pi terminal:
+   ```bash
+   hostname -I
+   ```
+   *(Example: `192.168.43.125`)*
+2. **Start Pi Agent & Dashboard**:
+   ```bash
+   cd ~/exam_proctoring/pi_agent
+   source venv/bin/activate
+   export PI_SHARED_TOKEN="your_secure_shared_secret"
+   export SERVO_ENABLED=false
+   export SERVO_DRY_RUN=true
+   python pi_server.py
+   ```
+3. **Open Pi Live Dashboard in Any Browser**:
+   Navigate to: **`http://192.168.43.125:5050/`** (or `http://raspberrypi.local:5050/`)
+   - Clean institutional white theme with zero emojis.
+   - Real-time status badge (`NORMAL` / `ALERT`), candidate face count, and alert totals.
+   - Servo motor position indicator (`-45°` Normal vs `+45°` Alert).
+   - Live audit history table of all received notifications.
+
+4. **Connect MacBook Proctoring Engine**:
+   In your MacBook's `~/exam_proctoring/.env`:
+   ```ini
+   PI_ENABLED=true
+   PI_BASE_URL=http://192.168.43.125:5050
+   PI_SHARED_TOKEN=your_secure_shared_secret
+   PI_TIMEOUT_SEC=2.0
+   ```
+   If the Pi is disconnected, powered off, or drops off Wi-Fi, **MacBook video proctoring continues uninterrupted**. The MacBook client uses non-blocking requests with a 2-second timeout and fails gracefully.
 
 ### Electrical Warning & Hardware Guardrails
 > [!CAUTION]
@@ -281,27 +316,6 @@ The Raspberry Pi agent is located in `pi_agent/`. It runs an authenticated Flask
 > - **External Power**: Use a dedicated 5V regulated DC supply (at least 1.5A).
 > - **Common Ground**: Connect the negative (-) terminal of the external supply to a Raspberry Pi Ground pin (e.g. Pin 6).
 > - **Signal Wire**: Connect the servo signal line to **GPIO 18** (Physical Pin 12).
-
-### Running in Safe Dry-Run Mode (Default)
-On the Raspberry Pi:
-```bash
-cd ~/proctor_agent
-source venv/bin/activate
-export PI_SHARED_TOKEN="your_secure_shared_secret"
-export SERVO_ENABLED=false
-export SERVO_DRY_RUN=true
-python pi_server.py
-```
-In dry-run mode, the server logs simulated movements (e.g. `[DRY-RUN SIMULATION] Would actuate servo on GPIO18 to position ALERT`) without pulsing hardware.
-
-### Connecting MacBook to Raspberry Pi
-On the MacBook, set `.env`:
-```ini
-PI_ENABLED=true
-PI_BASE_URL=http://raspberrypi.local:5050
-PI_SHARED_TOKEN=your_secure_shared_secret
-```
-If the Pi is disconnected, powered off, or on another subnet, **MacBook video proctoring continues uninterrupted**. The MacBook client uses non-blocking requests with a 2-second timeout and fails gracefully.
 
 ---
 

@@ -1,6 +1,9 @@
-# Raspberry Pi 3 Model B - Exam Proctoring Hardware Agent
+# Raspberry Pi 3 Model B - Exam Proctoring Hardware Agent & Live Dashboard
 
-This sub-project runs on a **Raspberry Pi 3 Model B** to receive authenticated status updates from the MacBook proctoring computer vision engine and actuate an optional indicator servo motor.
+This sub-project runs on a **Raspberry Pi 3 Model B** to:
+1. Receive authenticated status notifications from the MacBook computer vision engine over HTTP.
+2. Host an institutional, browser-based **Live Status Dashboard** on port 5050.
+3. Actuate an optional indicator servo motor (safe dry-run mode enabled by default).
 
 ---
 
@@ -37,104 +40,114 @@ This sub-project runs on a **Raspberry Pi 3 Model B** to receive authenticated s
 
 ---
 
-## 3. Servo Identification Checklist
+## 3. Connecting MacBook & Raspberry Pi via Mobile Hotspot
 
-Before toggling `SERVO_ENABLED=true`:
-1. **Identify the exact model stamped on the servo** (e.g. TowerPro SG90, MG90S, DS3218).
-2. **Consult manufacturer datasheet**:
-   - Operating Voltage: typically 4.8V – 6.0V.
-   - Operating Frequency: standard analog servos use 50 Hz (20 ms period).
-   - Pulse Range: standard conservative is 1.0 ms (-45°/0°) to 2.0 ms (+45°/90°).
-   - Stall Current: ensure your external supply provides at least 1.5A per motor.
+When your MacBook and Raspberry Pi are both connected to the same mobile hotspot:
 
----
-
-## 4. Raspberry Pi Software Installation
-
-### Step A: Flash Raspberry Pi OS Lite
-Use the official Raspberry Pi Imager to flash **Raspberry Pi OS Lite (64-bit or 32-bit)** to a microSD card.
-In the Imager settings gear:
-- Set hostname: `raspberrypi.local`
-- Enable SSH with password or public key
-- Configure Wi-Fi credentials (or connect via Ethernet)
-
-### Step B: Connect via SSH
-From your MacBook terminal:
+### Step 1: Find the Raspberry Pi's IP Address
+On your Raspberry Pi terminal (via display or SSH):
 ```bash
-ssh pi@raspberrypi.local
+hostname -I
+```
+*(Example output: `192.168.43.125`)*
+
+Alternatively, view connected devices inside your phone's Mobile Hotspot settings, or on your MacBook run:
+```bash
+arp -a
+# or
+ping raspberrypi.local
 ```
 
-### Step C: Deploy Pi Agent Code
-Copy `pi_agent/` files to the Pi, or clone the project:
+### Step 2: Configure Environment on the Raspberry Pi
+On the Raspberry Pi:
 ```bash
-mkdir -p ~/proctor_agent
-cd ~/proctor_agent
-```
-
-Create a virtual environment and install dependencies:
-```bash
-python3 -m venv venv
+cd ~/exam_proctoring/pi_agent   # or your deployed folder
 source venv/bin/activate
-pip install flask
-```
 
-*(Optional: Install hardware GPIO libraries only once wiring is verified):*
-```bash
-pip install gpiozero pigpio
-```
-
----
-
-## 5. Running in Safe Dry-Run Mode (Default)
-
-The agent defaults to **DRY-RUN mode**. No physical electrical signals are pulsed:
-
-```bash
-export PI_SHARED_TOKEN="your_secure_shared_secret_here"
+export PI_SHARED_TOKEN="your_secure_shared_secret"
 export SERVO_ENABLED=false
 export SERVO_DRY_RUN=true
 export PI_PORT=5050
+export PI_HOST=0.0.0.0
 
 python pi_server.py
 ```
 
-### Verification from MacBook
-Test the health endpoint from your MacBook:
-```bash
-curl -i http://raspberrypi.local:5050/health
+The Pi server will start:
+```
+[INFO] [PiAgent] Starting Raspberry Pi Proctoring Agent on 0.0.0.0:5050
+Servo Enabled: False | Dry Run Mode: True | Pin: GPIO18
 ```
 
-Expected response:
-```json
-{
-  "auth_configured": true,
-  "current_indicator_state": "IDLE",
-  "device": "Raspberry Pi 3 Model B Agent",
-  "dry_run": true,
-  "servo_enabled": false,
-  "servo_pin": 18,
-  "status": "online"
-}
+### Step 3: Configure `.env` on your MacBook
+In your MacBook's `~/exam_proctoring/.env` file:
+```ini
+PI_ENABLED=true
+PI_BASE_URL=http://192.168.43.125:5050
+PI_SHARED_TOKEN=your_secure_shared_secret
+PI_TIMEOUT_SEC=2.0
 ```
-
-Test authenticated status update:
-```bash
-curl -i -X POST http://raspberrypi.local:5050/status \
-  -H "Authorization: Bearer your_secure_shared_secret_here" \
-  -H "Content-Type: application/json" \
-  -d '{"status": "ALERT", "event_type": "FACE_ABSENT", "face_count": 0, "explanation": "Test alert"}'
-```
-
-The Pi console will print:
-`[DRY-RUN SIMULATION] Would actuate servo on GPIO18 to position ALERT (approx angle: 45 deg). Physical actuation is DISABLED.`
+*(Replace `192.168.43.125` with your Pi's actual hotspot IP).*
 
 ---
 
-## 6. Enabling Physical Hardware (Advanced)
+## 4. Live Browser Dashboard on the Raspberry Pi
 
-Only enable after completing Section 1 & 2:
+The Raspberry Pi serves an independent, real-time live monitoring dashboard:
+
+👉 **`http://<RASPBERRY_PI_IP>:5050/`** (e.g. `http://192.168.43.125:5050/`)
+
+### Dashboard Features:
+- **Clean Institutional Theme**: Consistent white and slate palette, zero emojis, high-contrast typography.
+- **Hero Status Banner**: Displays live proctoring state (`NORMAL` in green, `ALERT` in crimson, or `AWAITING CONNECTION` in slate).
+- **Servo Indicator**: Shows current indicator position (`Normal (-45°)` vs `Alert (+45°)`) and hardware mode (`Dry-Run Simulation` vs `Physical Active`).
+- **Telemetry Tiles**: Face count, active anomaly type, alert counter, and seconds since last update.
+- **Audit Table**: Shows received status updates with timestamps and proctor explanation notes.
+
+---
+
+## 5. Endpoints Reference
+
+| Endpoint | Method | Auth Required | Purpose |
+|---|---|---|---|
+| `/` | GET | No | Live Status Web Dashboard |
+| `/health` | GET | No | Liveness probe for MacBook client |
+| `/api/status` | GET | No | Real-time JSON telemetry for browser polling |
+| `/status` | POST | **Yes** (Bearer) | Receives proctoring status and actuates servo |
+| `/test_servo` | POST | **Yes** (Bearer) | Manually triggers test servo movement |
+| `/api/clear_history` | POST | **Yes** (Bearer) | Resets in-memory event history |
+
+---
+
+## 6. Testing Communication from MacBook
+
+### Health Check:
 ```bash
-export PI_SHARED_TOKEN="your_secure_shared_secret_here"
+curl -s http://192.168.43.125:5050/health
+```
+
+### Send Authenticated Status:
+```bash
+curl -X POST http://192.168.43.125:5050/status \
+  -H "Authorization: Bearer your_secure_shared_secret" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "status": "ALERT",
+    "event_type": "FACE_ABSENT",
+    "face_count": 0,
+    "explanation": "Candidate absent from camera frame for 5.0 seconds."
+  }'
+```
+
+The Pi dashboard at `http://192.168.43.125:5050/` will instantly update to show `ALERT`, update the telemetry, and record the entry in the table.
+
+---
+
+## 7. Enabling Physical Hardware (Advanced)
+
+Only enable after completing the electrical verification checklist in Section 1:
+```bash
+export PI_SHARED_TOKEN="your_secure_shared_secret"
 export SERVO_ENABLED=true
 export SERVO_DRY_RUN=false
 export SERVO_PIN=18

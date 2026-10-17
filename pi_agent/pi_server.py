@@ -1,17 +1,28 @@
 """Raspberry Pi 3 Model B Status & Hardware Controller Agent.
 
-A secure, lightweight Flask service designed to run on the Raspberry Pi.
-Receives authenticated status notifications from the MacBook proctoring system
-and provides safe, opt-in servo motor alerting with conservative default guardrails.
+A secure, lightweight Flask service designed to run on the Raspberry Pi 3 Model B.
+Receives authenticated status notifications from the MacBook proctoring system,
+serves a clean browser-based live status dashboard, and provides safe, opt-in
+servo motor alerting with conservative default guardrails.
 """
 
 from __future__ import annotations
 
+import collections
 import logging
 import os
 import sys
-from typing import Any, Dict, Optional, Tuple
-from flask import Flask, jsonify, request
+import threading
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+from flask import Flask, jsonify, render_template, request
+
+# Base directory for pi_agent assets
+BASE_DIR = Path(__file__).resolve().parent
+TEMPLATE_DIR = BASE_DIR / "templates"
+STATIC_DIR = BASE_DIR / "static"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -19,7 +30,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("PiAgent")
 
-app = Flask(__name__)
+app = Flask(
+    __name__,
+    template_folder=str(TEMPLATE_DIR),
+    static_folder=str(STATIC_DIR),
+)
 
 # --- Environment Configuration ---
 SHARED_TOKEN = os.getenv("PI_SHARED_TOKEN", "")
@@ -44,6 +59,7 @@ class ServoController:
         self.pin = pin
         self._servo_device = None
         self._current_state = "IDLE"
+        self._current_angle = 0
 
         if self.enabled and not self.dry_run:
             self._init_hardware()
@@ -88,6 +104,7 @@ class ServoController:
         """Command servo to visual indicator position based on status."""
         target_state = "ALERT" if status == "ALERT" else "NORMAL"
         target_angle = 45 if target_state == "ALERT" else -45
+        self._current_angle = target_angle
 
         if self.dry_run or not self.enabled:
             msg = (
@@ -122,6 +139,88 @@ servo = ServoController(
 )
 
 
+class PiMonitorState:
+    """In-memory state and recent history store for the Raspberry Pi live dashboard."""
+
+    def __init__(self, max_history: int = 30) -> None:
+        self._lock = threading.Lock()
+        self.current_status = "IDLE"
+        self.event_type = "NONE"
+        self.face_count = 0
+        self.explanation = "Awaiting initial status update from MacBook."
+        self.last_timestamp: Optional[str] = None
+        self.last_received_epoch: float = 0.0
+        self.total_alerts: int = 0
+        self.total_updates: int = 0
+        self.history: collections.deque = collections.deque(maxlen=max_history)
+
+    def record_update(
+        self,
+        status: str,
+        event_type: str,
+        face_count: int,
+        explanation: str,
+        timestamp: Optional[str] = None,
+    ) -> None:
+        with self._lock:
+            self.current_status = status
+            self.event_type = event_type
+            self.face_count = face_count
+            self.explanation = explanation
+            now_iso = timestamp or datetime.now(timezone.utc).astimezone().isoformat()
+            self.last_timestamp = now_iso
+            self.last_received_epoch = time.time()
+            self.total_updates += 1
+            if status == "ALERT":
+                self.total_alerts += 1
+
+            self.history.appendleft({
+                "index": self.total_updates,
+                "timestamp": now_iso,
+                "status": status,
+                "event_type": event_type,
+                "face_count": face_count,
+                "explanation": explanation,
+            })
+
+    def get_snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            now = time.time()
+            time_since = round(now - self.last_received_epoch, 1) if self.last_received_epoch > 0 else None
+            # Consider connected if an update arrived within the last 30 seconds
+            is_connected = time_since is not None and time_since < 30.0
+
+            return {
+                "current_status": self.current_status,
+                "event_type": self.event_type,
+                "face_count": self.face_count,
+                "explanation": self.explanation,
+                "last_timestamp": self.last_timestamp,
+                "seconds_since_update": time_since,
+                "is_connected": is_connected,
+                "total_alerts": self.total_alerts,
+                "total_updates": self.total_updates,
+                "servo": {
+                    "enabled": servo.enabled,
+                    "dry_run": servo.dry_run,
+                    "pin": servo.pin,
+                    "state": servo._current_state,
+                    "angle": servo._current_angle,
+                },
+                "history": list(self.history),
+            }
+
+    def clear_history(self) -> None:
+        with self._lock:
+            self.history.clear()
+            self.total_alerts = 0
+            self.total_updates = 0
+
+
+# Global state store
+monitor_state = PiMonitorState()
+
+
 def verify_authentication() -> Optional[Tuple[Dict[str, str], int]]:
     """Validate incoming request authorization against the configured SHARED_TOKEN."""
     if not SHARED_TOKEN:
@@ -146,9 +245,42 @@ def verify_authentication() -> Optional[Tuple[Dict[str, str], int]]:
     return None
 
 
+# --- Web Dashboard Routes ---
+
+@app.route("/", methods=["GET"])
+def dashboard_view():
+    """Serve the clean, white-themed Raspberry Pi Live Status Dashboard."""
+    state = monitor_state.get_snapshot()
+    return render_template(
+        "index.html",
+        servo_enabled=servo.enabled,
+        servo_dry_run=servo.dry_run,
+        servo_pin=servo.pin,
+        auth_configured=bool(SHARED_TOKEN),
+    )
+
+
+@app.route("/api/status", methods=["GET"])
+def get_dashboard_status():
+    """Unauthenticated polling endpoint for the local browser dashboard."""
+    return jsonify(monitor_state.get_snapshot()), 200
+
+
+@app.route("/api/clear_history", methods=["POST"])
+def clear_dashboard_history():
+    """Endpoint to reset event history on the dashboard."""
+    auth_err = verify_authentication()
+    if auth_err:
+        return jsonify(auth_err[0]), auth_err[1]
+    monitor_state.clear_history()
+    return jsonify({"acknowledged": True, "message": "History cleared"}), 200
+
+
+# --- External Proctoring API Endpoints ---
+
 @app.route("/health", methods=["GET"])
 def health_check():
-    """Public diagnostic health check endpoint."""
+    """Public diagnostic health check endpoint used by the MacBook client."""
     return jsonify({
         "status": "online",
         "device": "Raspberry Pi 3 Model B Agent",
@@ -162,7 +294,7 @@ def health_check():
 
 @app.route("/status", methods=["POST"])
 def update_status():
-    """Authenticated endpoint receiving proctoring status updates."""
+    """Authenticated endpoint receiving proctoring status updates from MacBook."""
     auth_err = verify_authentication()
     if auth_err:
         return jsonify(auth_err[0]), auth_err[1]
@@ -178,6 +310,7 @@ def update_status():
     event_type = data.get("event_type", "UNKNOWN")
     face_count = data.get("face_count", 0)
     explanation = data.get("explanation", "")
+    timestamp = data.get("timestamp")
 
     # Strict validation of status values
     if status not in ("NORMAL", "ALERT"):
@@ -190,6 +323,16 @@ def update_status():
         f"Faces={face_count}, Detail='{explanation}'"
     )
 
+    # Record update into in-memory dashboard state
+    monitor_state.record_update(
+        status=status,
+        event_type=event_type,
+        face_count=face_count,
+        explanation=explanation,
+        timestamp=timestamp,
+    )
+
+    # Actuate or simulate servo motor
     success, action_message = servo.set_position(status)
 
     return jsonify({
@@ -211,6 +354,13 @@ def test_servo():
         target = "ALERT"
 
     success, msg = servo.set_position(target)
+    monitor_state.record_update(
+        status=target,
+        event_type="TEST_TRIGGER",
+        face_count=1 if target == "NORMAL" else 0,
+        explanation=f"Manual test actuation: {msg}",
+    )
+
     return jsonify({
         "test_executed": True,
         "target_state": target,

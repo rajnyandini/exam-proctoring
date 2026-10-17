@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Raspberry Pi - Live Proctoring Monitor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-page: #f8fafc;
+            --bg-panel: #ffffff;
+            --bg-subtle: #f1f5f9;
+            --border-color: #e2e8f0;
+            --border-subtle: #edf2f7;
+
+            --text-main: #0f172a;
+            --text-body: #334155;
+            --text-muted: #64748b;
+            --text-subtle: #94a3b8;
+
+            --color-primary: #0f172a;
+            --color-blue: #2563eb;
+
+            --status-normal-bg: #f0fdf4;
+            --status-normal-border: #bbf7d0;
+            --status-normal-text: #166534;
+            --status-normal-dot: #16a34a;
+
+            --status-alert-bg: #fef2f2;
+            --status-alert-border: #fecaca;
+            --status-alert-text: #991b1b;
+            --status-alert-dot: #dc2626;
+
+            --status-neutral-bg: #f8fafc;
+            --status-neutral-border: #e2e8f0;
+            --status-neutral-text: #475569;
+            --status-neutral-dot: #94a3b8;
+
+            --radius-sm: 4px;
+            --radius-md: 8px;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 1px 3px 0 rgba(0, 0, 0, 0.06), 0 1px 2px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-page);
+            color: var(--text-body);
+            line-height: 1.5;
+            padding: 24px 20px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .pi-container {
+            max-width: 1100px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* Header */
+        .pi-header {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .header-brand {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .brand-monogram {
+            width: 38px;
+            height: 38px;
+            background: var(--color-primary);
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 13px;
+            letter-spacing: 0.05em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: var(--radius-sm);
+        }
+
+        .brand-title h1 {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-main);
+            letter-spacing: -0.01em;
+        }
+
+        .brand-sub {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .connection-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 9999px;
+            font-size: 12px;
+            font-weight: 600;
+            background: var(--bg-subtle);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+        }
+
+        .conn-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background-color: var(--text-subtle);
+        }
+
+        .conn-online .conn-dot {
+            background-color: var(--status-normal-dot);
+        }
+
+        .conn-online {
+            color: var(--status-normal-text);
+            border-color: var(--status-normal-border);
+            background-color: var(--status-normal-bg);
+        }
+
+        /* Primary Status Card */
+        .hero-status-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 28px 24px;
+            box-shadow: var(--shadow-sm);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .hero-left {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .status-badge-lg {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 18px;
+            border-radius: 9999px;
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+            border: 1px solid transparent;
+            width: fit-content;
+        }
+
+        .badge-lg-normal {
+            background: var(--status-normal-bg);
+            border-color: var(--status-normal-border);
+            color: var(--status-normal-text);
+        }
+
+        .badge-lg-alert {
+            background: var(--status-alert-bg);
+            border-color: var(--status-alert-border);
+            color: var(--status-alert-text);
+        }
+
+        .badge-lg-idle {
+            background: var(--status-neutral-bg);
+            border-color: var(--status-neutral-border);
+            color: var(--status-neutral-text);
+        }
+
+        .status-dot-lg {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background-color: currentColor;
+        }
+
+        .hero-detail {
+            font-size: 14px;
+            color: var(--text-body);
+            max-width: 580px;
+        }
+
+        .hero-timestamp {
+            font-size: 12px;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .hero-servo-indicator {
+            background: var(--bg-subtle);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 16px 20px;
+            min-width: 260px;
+            text-align: right;
+        }
+
+        .servo-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--text-muted);
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .servo-pos {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-main);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .servo-mode {
+            font-size: 11.5px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* Metrics Grid */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }
+
+        @media (max-width: 800px) {
+            .metrics-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+            .hero-status-card {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .hero-servo-indicator {
+                width: 100%;
+                text-align: left;
+            }
+        }
+
+        .metric-tile {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 16px 20px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .metric-caption {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--text-muted);
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .metric-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--text-main);
+            font-family: 'JetBrains Mono', monospace;
+            line-height: 1.1;
+        }
+
+        .metric-sub {
+            font-size: 11.5px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* History Table Panel */
+        .table-panel {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-sm);
+            overflow: hidden;
+        }
+
+        .table-panel-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .table-container {
+            overflow-x: auto;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            text-align: left;
+        }
+
+        .data-table th {
+            background: var(--bg-subtle);
+            padding: 10px 16px;
+            font-weight: 600;
+            color: var(--text-muted);
+            font-size: 11.5px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .data-table td {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-subtle);
+            color: var(--text-body);
+        }
+
+        .data-table tr:hover {
+            background-color: var(--bg-page);
+        }
+
+        .table-empty {
+            text-align: center;
+            color: var(--text-muted);
+            padding: 28px !important;
+        }
+
+        .badge-sm {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: var(--radius-sm);
+            font-size: 11px;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .badge-normal {
+            background: var(--status-normal-bg);
+            border: 1px solid var(--status-normal-border);
+            color: var(--status-normal-text);
+        }
+
+        .badge-alert {
+            background: var(--status-alert-bg);
+            border: 1px solid var(--status-alert-border);
+            color: var(--status-alert-text);
+        }
+
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .app-footer {
+            text-align: center;
+            font-size: 12px;
+            color: var(--text-muted);
+            padding: 8px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="pi-container">
+        <!-- Header -->
+        <header class="pi-header">
+            <div class="header-brand">
+                <div class="brand-monogram">RPI</div>
+                <div class="brand-title">
+                    <h1>Raspberry Pi Proctor Monitor</h1>
+                    <p class="brand-sub">Hardware Agent &bull; Port 5050 &bull; Local Network Node</p>
+                </div>
+            </div>
+            <div class="connection-indicator" id="connIndicator">
+                <span class="conn-dot"></span>
+                <span id="connText">Awaiting Host</span>
+            </div>
+        </header>
+
+        <!-- Hero Status Card -->
+        <section class="hero-status-card">
+            <div class="hero-left">
+                <div class="status-badge-lg badge-lg-idle" id="heroStatusBadge">
+                    <span class="status-dot-lg"></span>
+                    <span id="heroStatusText">AWAITING CONNECTION</span>
+                </div>
+                <p class="hero-detail" id="heroDetailText">
+                    Waiting for authenticated proctoring updates from the MacBook computer vision engine.
+                </p>
+                <span class="hero-timestamp" id="heroTimestamp">Last update: Never</span>
+            </div>
+            <div class="hero-servo-indicator">
+                <div class="servo-label">Servo Indicator</div>
+                <div class="servo-pos" id="servoPosText">IDLE (0&deg;)</div>
+                <div class="servo-mode" id="servoModeText">
+                    {{ 'Physical (GPIO ' ~ servo_pin ~ ')' if (servo_enabled and not servo_dry_run) else 'Dry-Run Simulation' }}
+                </div>
+            </div>
+        </section>
+
+        <!-- Metrics Grid -->
+        <section class="metrics-grid">
+            <div class="metric-tile">
+                <div class="metric-caption">Current State</div>
+                <div class="metric-value" id="valCurrentStatus">--</div>
+                <div class="metric-sub" id="valEventType">Type: None</div>
+            </div>
+            <div class="metric-tile">
+                <div class="metric-caption">Detected Faces</div>
+                <div class="metric-value" id="valFaceCount">--</div>
+                <div class="metric-sub">Expected: 1</div>
+            </div>
+            <div class="metric-tile">
+                <div class="metric-caption">Alerts Received</div>
+                <div class="metric-value" id="valTotalAlerts">0</div>
+                <div class="metric-sub">Flagged anomalies</div>
+            </div>
+            <div class="metric-tile">
+                <div class="metric-caption">Total Updates</div>
+                <div class="metric-value" id="valTotalUpdates">0</div>
+                <div class="metric-sub" id="valLastContact">No contact</div>
+            </div>
+        </section>
+
+        <!-- History Table Panel -->
+        <section class="table-panel">
+            <div class="table-panel-header">
+                <h2 class="panel-title">Received Status History</h2>
+                <span class="mono" style="font-size: 11.5px; color: var(--text-muted);" id="historyCounter">0 entries</span>
+            </div>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Timestamp</th>
+                            <th>Status</th>
+                            <th>Classification</th>
+                            <th>Faces</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyTableBody">
+                        <tr>
+                            <td colspan="6" class="table-empty">No status updates received yet.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <footer class="app-footer">
+            <p>Raspberry Pi 3 Model B Status Node &bull; Institutional Theme &bull; 0.0.0.0:5050</p>
+        </footer>
+    </div>
+
+    <script>
+        let pollTimer = null;
+
+        document.addEventListener("DOMContentLoaded", () => {
+            fetchPiStatus();
+            pollTimer = setInterval(fetchPiStatus, 1000);
+        });
+
+        async function fetchPiStatus() {
+            try {
+                const res = await fetch("/api/status");
+                if (!res.ok) throw new Error("HTTP " + res.status);
+                const data = await res.json();
+                updatePiDashboard(data);
+            } catch (err) {
+                console.warn("Pi status fetch failed:", err);
+                const conn = document.getElementById("connIndicator");
+                conn.className = "connection-indicator";
+                document.getElementById("connText").innerText = "Offline";
+            }
+        }
+
+        function updatePiDashboard(data) {
+            // 1. Connection indicator
+            const conn = document.getElementById("connIndicator");
+            const connText = document.getElementById("connText");
+            if (data.is_connected) {
+                conn.className = "connection-indicator conn-online";
+                connText.innerText = "Host Connected";
+            } else if (data.seconds_since_update !== null) {
+                conn.className = "connection-indicator";
+                connText.innerText = `Host Idle (${data.seconds_since_update}s ago)`;
+            } else {
+                conn.className = "connection-indicator";
+                connText.innerText = "Awaiting Host";
+            }
+
+            // 2. Hero status badge
+            const heroBadge = document.getElementById("heroStatusBadge");
+            const heroStatusText = document.getElementById("heroStatusText");
+            const status = data.current_status;
+
+            heroStatusText.innerText = status;
+            heroBadge.className = "status-badge-lg";
+
+            if (status === "NORMAL") {
+                heroBadge.classList.add("badge-lg-normal");
+            } else if (status === "ALERT") {
+                heroBadge.classList.add("badge-lg-alert");
+            } else {
+                heroBadge.classList.add("badge-lg-idle");
+            }
+
+            // 3. Hero Details
+            document.getElementById("heroDetailText").innerText = data.explanation || "No explanation provided.";
+            if (data.last_timestamp) {
+                const cleanTs = data.last_timestamp.replace("T", " ").split(".")[0];
+                document.getElementById("heroTimestamp").innerText = `Last update: ${cleanTs} (${data.seconds_since_update}s ago)`;
+            } else {
+                document.getElementById("heroTimestamp").innerText = "Last update: Never";
+            }
+
+            // 4. Servo Position
+            const servo = data.servo;
+            const servoPos = document.getElementById("servoPosText");
+            servoPos.innerText = `${servo.state} (${servo.angle > 0 ? "+" : ""}${servo.angle}\u00B0)`;
+            if (servo.state === "ALERT") {
+                servoPos.style.color = "var(--status-alert-text)";
+            } else if (servo.state === "NORMAL") {
+                servoPos.style.color = "var(--status-normal-text)";
+            } else {
+                servoPos.style.color = "var(--text-main)";
+            }
+
+            // 5. Metrics
+            document.getElementById("valCurrentStatus").innerText = data.current_status;
+            document.getElementById("valEventType").innerText = `Type: ${data.event_type}`;
+            document.getElementById("valFaceCount").innerText = data.face_count;
+            document.getElementById("valTotalAlerts").innerText = data.total_alerts;
+            document.getElementById("valTotalUpdates").innerText = data.total_updates;
+            document.getElementById("valLastContact").innerText = data.seconds_since_update !== null
+                ? `${data.seconds_since_update}s ago`
+                : "No contact";
+
+            // 6. History Table
+            renderHistory(data.history || []);
+        }
+
+        function renderHistory(items) {
+            const tbody = document.getElementById("historyTableBody");
+            document.getElementById("historyCounter").innerText = `${items.length} entries`;
+
+            if (items.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="table-empty">No status updates received yet.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = items.map(item => {
+                const isAlert = item.status === "ALERT";
+                const badgeClass = isAlert ? "badge-alert" : "badge-normal";
+                const cleanTs = (item.timestamp || "").replace("T", " ").split(".")[0];
+
+                return `
+                    <tr>
+                        <td class="mono" style="font-size: 11px;">#${item.index}</td>
+                        <td class="mono" style="font-size: 11.5px; color: var(--text-muted);">${cleanTs}</td>
+                        <td><span class="badge-sm ${badgeClass}">${item.status}</span></td>
+                        <td class="mono" style="font-size: 12px;">${item.event_type}</td>
+                        <td style="font-weight: 500;">${item.face_count}</td>
+                        <td style="font-size: 12px;">${escapeHtml(item.explanation)}</td>
+                    </tr>
+                `;
+            }).join("");
+        }
+
+        function escapeHtml(text) {
+            if (!text) return "";
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+    </script>
+</body>
+</html>
