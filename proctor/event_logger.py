@@ -126,8 +126,20 @@ class EventLogger:
         # Use timezone-aware local ISO 8601 string
         now = datetime.now(timezone.utc).astimezone()
         timestamp_str = now.isoformat()
-        unique_suffix = uuid.uuid4().hex[:8]
-        event_id = f"EVT-{now.strftime('%Y%m%d-%H%M%S')}-{unique_suffix}"
+
+        # Generate clean sequential event ID without random alphanumeric patterns
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT COUNT(*) FROM events")
+            total_events = cursor.fetchone()[0]
+        event_num = total_events + 1
+        event_id = f"EVT-{event_num:04d}"
+        while True:
+            with self._get_connection() as conn:
+                exists = conn.execute("SELECT 1 FROM events WHERE id = ?", (event_id,)).fetchone()
+            if not exists:
+                break
+            event_num += 1
+            event_id = f"EVT-{event_num:04d}"
 
         snapshot_filename = None
         if frame is not None and not is_camera_fault:

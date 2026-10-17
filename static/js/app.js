@@ -1,7 +1,6 @@
-// Exam Proctoring Dashboard Frontend Application
+// Exam Proctoring System - Professional Client Application
 
 let pollInterval = null;
-let sessionStartTime = null;
 
 document.addEventListener("DOMContentLoaded", () => {
     initDashboard();
@@ -10,7 +9,6 @@ document.addEventListener("DOMContentLoaded", () => {
 function initDashboard() {
     pollStatus();
     fetchEvents();
-    // Poll telemetry at 1 second intervals
     pollInterval = setInterval(pollStatus, 1000);
 }
 
@@ -23,7 +21,7 @@ async function pollStatus() {
         updateUI(data);
     } catch (err) {
         console.warn("Status poll failed:", err);
-        showCameraError("Cannot connect to proctoring server on 127.0.0.1");
+        showCameraError("Cannot connect to proctoring service on 127.0.0.1");
     }
 }
 
@@ -46,20 +44,20 @@ function updateUI(data) {
         badge.classList.add("status-stopped");
     }
 
-    // 2. Update Raspberry Pi Badge
+    // 2. Update Raspberry Pi Status Indicator
     const piBadge = document.getElementById("piBadge");
     const piStatusText = document.getElementById("piStatusText");
     if (!data.pi.enabled) {
-        piStatusText.innerText = "Pi: DISABLED";
+        piStatusText.innerText = "Raspberry Pi: Disabled";
         piBadge.style.opacity = "0.7";
     } else if (data.pi.online) {
-        piStatusText.innerText = "Pi: ONLINE";
-        piBadge.style.borderColor = "var(--accent-green)";
+        piStatusText.innerText = "Raspberry Pi: Online";
+        piBadge.style.borderColor = "var(--status-normal-border)";
         piBadge.style.opacity = "1.0";
     } else {
-        piStatusText.innerText = "Pi: OFFLINE";
-        piBadge.style.borderColor = "var(--accent-amber)";
-        piBadge.style.opacity = "0.8";
+        piStatusText.innerText = "Raspberry Pi: Offline";
+        piBadge.style.borderColor = "var(--status-warn-border)";
+        piBadge.style.opacity = "0.85";
     }
 
     // 3. Update Camera Stream & Overlay
@@ -69,7 +67,7 @@ function updateUI(data) {
 
     if (data.camera.online) {
         overlay.classList.add("hidden");
-        specBadge.innerText = `${data.camera.backend} • ${data.camera.width}×${data.camera.height} (${data.camera.fps} FPS)`;
+        specBadge.innerHTML = `${data.camera.backend} &bull; ${data.camera.width}&times;${data.camera.height} &bull; ${data.camera.fps} FPS`;
     } else {
         overlay.classList.remove("hidden");
         errorDetails.innerText = data.camera.error || "Webcam offline or permission not granted.";
@@ -90,12 +88,12 @@ function updateUI(data) {
 
     // Active timer subtexts
     const absTimerSub = document.getElementById("absenceTimerSub");
-    absTimerSub.innerText = `Active absence: ${data.absence_elapsed_sec}s`;
-    absTimerSub.style.color = data.absence_elapsed_sec > 0 ? "var(--accent-amber)" : "var(--text-muted)";
+    absTimerSub.innerText = `Active duration: ${data.absence_elapsed_sec}s`;
+    absTimerSub.style.color = data.absence_elapsed_sec > 0 ? "var(--status-warn-text)" : "var(--text-muted)";
 
     const mulTimerSub = document.getElementById("multipleTimerSub");
-    mulTimerSub.innerText = `Active multiple: ${data.multiple_elapsed_sec}s`;
-    mulTimerSub.style.color = data.multiple_elapsed_sec > 0 ? "var(--accent-amber)" : "var(--text-muted)";
+    mulTimerSub.innerText = `Active duration: ${data.multiple_elapsed_sec}s`;
+    mulTimerSub.style.color = data.multiple_elapsed_sec > 0 ? "var(--status-warn-text)" : "var(--text-muted)";
 
     // Toggle button state
     document.getElementById("btnStartSession").disabled = data.is_active;
@@ -152,33 +150,33 @@ function renderEventsTable(events) {
     if (!events || events.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="6" class="text-center text-muted">No proctoring anomalies recorded yet.</td>
+                <td colspan="6" class="table-empty">No proctoring anomalies recorded.</td>
             </tr>
         `;
         return;
     }
 
     tbody.innerHTML = events.map(evt => {
-        let badgeClass = "badge-camera";
+        let badgeClass = "badge-system";
         if (evt.event_type === "FACE_ABSENT") badgeClass = "badge-absence";
         if (evt.event_type === "MULTIPLE_FACES") badgeClass = "badge-multiple";
 
         const snapshotHtml = evt.snapshot_filename
             ? `<img src="/evidence/${evt.snapshot_filename}" 
-                    class="snapshot-thumb" 
-                    alt="Evidence" 
+                    class="snapshot-preview-img" 
+                    alt="Evidence Preview" 
                     onclick="openModal('/evidence/${evt.snapshot_filename}', '${evt.id}', '${evt.event_type}', '${evt.timestamp}')">`
-            : `<span class="text-muted">None</span>`;
+            : `<span style="color: var(--text-muted); font-size: 12px;">None</span>`;
 
-        // Format timestamp cleanly
+        // Clean ISO timestamp to format: YYYY-MM-DD HH:MM:SS
         const cleanTs = evt.timestamp.replace("T", " ").split(".")[0];
 
         return `
             <tr>
-                <td style="font-family: 'JetBrains Mono', monospace; font-size: 11px;">${evt.id}</td>
-                <td style="font-size: 12px; color: var(--text-secondary);">${cleanTs}</td>
-                <td><span class="event-type-badge ${badgeClass}">${evt.event_type}</span></td>
-                <td>${evt.face_count}</td>
+                <td class="mono-text" style="font-size: 11.5px; font-weight: 500;">${evt.id}</td>
+                <td style="font-size: 12px; color: var(--text-muted);">${cleanTs}</td>
+                <td><span class="event-badge ${badgeClass}">${evt.event_type}</span></td>
+                <td style="font-size: 12px; font-weight: 500;">${evt.face_count}</td>
                 <td style="font-size: 12px;">${escapeHtml(evt.explanation)}</td>
                 <td>${snapshotHtml}</td>
             </tr>
@@ -188,7 +186,7 @@ function renderEventsTable(events) {
 
 async function confirmClearEvents() {
     const confirmed = confirm(
-        "Are you sure you want to clear all logged test events and delete evidence snapshots from disk?\n\nThis cannot be undone."
+        "Clear all logged test events and delete associated evidence snapshots from disk?"
     );
     if (!confirmed) return;
 
@@ -198,7 +196,6 @@ async function confirmClearEvents() {
         if (res.success) {
             fetchEvents();
             pollStatus();
-            alert(`Cleared ${res.cleared_count} test events.`);
         }
     } catch (e) {
         alert("Failed to clear events: " + e.message);
@@ -214,7 +211,7 @@ function openModal(imgSrc, eventId, eventType, timestamp) {
 
     modalTitle.innerText = `Evidence Snapshot: ${eventType} (${eventId})`;
     modalImg.src = imgSrc;
-    modalCaption.innerText = `Captured: ${timestamp} • Frame flagged for human proctor verification.`;
+    modalCaption.innerText = `Timestamp: ${timestamp} \u2022 Preliminary event recorded for proctor verification.`;
     modal.classList.remove("hidden");
 }
 

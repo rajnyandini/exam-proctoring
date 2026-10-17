@@ -96,7 +96,14 @@ class MonitoringService:
             if not self.camera.start():
                 logger.warning("Camera failed to start during session initialization.")
 
-            self.session_id = session_id or f"exam_{uuid.uuid4().hex[:8]}"
+            if not session_id:
+                if not hasattr(self, "_session_counter"):
+                    self._session_counter = 0
+                self._session_counter += 1
+                self.session_id = f"Session {self._session_counter}"
+            else:
+                self.session_id = session_id
+
             self._session_start_monotonic = time.monotonic()
             self._session_start_wall = time.time()
             self._absence_start_mono = None
