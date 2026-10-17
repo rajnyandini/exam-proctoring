@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exam Proctoring System</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top App Header -->
+        <header class="app-header">
+            <div class="header-left">
+                <div class="logo-mark">
+                    <span class="icon">👁️</span>
+                </div>
+                <div>
+                    <h1>Exam Proctoring System</h1>
+                    <p class="subtitle">AI-Assisted Computer Vision Proctoring Dashboard</p>
+                </div>
+            </div>
+            <div class="header-right">
+                <div id="statusBadge" class="status-badge status-normal">
+                    <span class="pulse-dot"></span>
+                    <span id="statusText">INITIALIZING</span>
+                </div>
+                <div class="device-badge" id="piBadge" title="Raspberry Pi 3B Status">
+                    <span class="icon">🥧</span>
+                    <span id="piStatusText">Pi: {{ 'CONNECTED' if pi_enabled else 'LOCAL ONLY' }}</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Academic & Responsible AI Review Banner -->
+        <div class="review-disclaimer-banner">
+            <span class="banner-icon">⚖️</span>
+            <div class="banner-content">
+                <strong>Academic Prototype Notice:</strong>
+                Automated detection events are indicators flagged for human proctor review. They do not constitute conclusive proof of cheating or grounds for automatic penalty. Lighting, facial occlusion, and hardware noise can produce false detections.
+            </div>
+        </div>
+
+        <!-- Main Workspace Grid -->
+        <main class="dashboard-grid">
+            <!-- Left Column: Video Feed & Controls -->
+            <section class="card video-card">
+                <div class="card-header">
+                    <h2>Live Video Feed</h2>
+                    <span class="badge" id="cameraSpecBadge">AVFOUNDATION • 640×480</span>
+                </div>
+                <div class="card-body">
+                    <div class="video-container" id="videoContainer">
+                        <img id="cameraStream" src="/video_feed" alt="Live Proctoring Camera Feed" onerror="handleStreamError()">
+                        <div id="cameraOfflineOverlay" class="camera-offline-overlay hidden">
+                            <div class="offline-box">
+                                <span class="offline-icon">📷⚠️</span>
+                                <h3>Camera Stream Unavailable</h3>
+                                <p id="cameraErrorDetails">Checking camera permissions or device availability...</p>
+                                <button class="btn btn-secondary" onclick="retryStream()">Retry Stream</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Session Controls -->
+                    <div class="controls-bar">
+                        <div class="button-group">
+                            <button id="btnStartSession" class="btn btn-primary" onclick="startSession()">
+                                ▶ Start Session
+                            </button>
+                            <button id="btnStopSession" class="btn btn-danger" onclick="stopSession()">
+                                ⏹ Stop Session
+                            </button>
+                        </div>
+                        <div class="stream-info">
+                            <span id="fpsIndicator">Target: 15 FPS</span>
+                            <span class="separator">•</span>
+                            <span id="sessionTimerDisplay">Elapsed: 00:00:00</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Column: Metrics & Telemetry -->
+            <section class="card telemetry-card">
+                <div class="card-header">
+                    <h2>Session Telemetry</h2>
+                    <span class="session-id-tag" id="sessionIdTag">Session: ...</span>
+                </div>
+                <div class="card-body">
+                    <!-- Metric Cards -->
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-label">Detected Faces</div>
+                            <div class="metric-value" id="faceCountVal">--</div>
+                            <div class="metric-sub" id="faceCountSub">Target: exactly 1</div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-label">Flagged Anomalies</div>
+                            <div class="metric-value highlight" id="totalAnomaliesVal">0</div>
+                            <div class="metric-sub">Pending review</div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-label">Face Absence (> {{ absence_threshold }}s)</div>
+                            <div class="metric-value" id="absenceCountVal">0</div>
+                            <div class="metric-sub" id="absenceTimerSub">Active: 0.0s</div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-label">Multiple Faces (> {{ multiple_threshold }}s)</div>
+                            <div class="metric-value" id="multipleCountVal">0</div>
+                            <div class="metric-sub" id="multipleTimerSub">Active: 0.0s</div>
+                        </div>
+                    </div>
+
+                    <!-- Threshold Configuration Pill Box -->
+                    <div class="config-summary-box">
+                        <span class="config-item">⏱ Absence Threshold: <strong>{{ absence_threshold }}s</strong></span>
+                        <span class="config-item">⏱ Multiple Faces Threshold: <strong>{{ multiple_threshold }}s</strong></span>
+                        <span class="config-item">🔒 Shared Pi Secret: <strong>Configured</strong></span>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Lower Section: Event History & Evidence -->
+        <section class="card events-card">
+            <div class="card-header">
+                <div>
+                    <h2>Flagged Event Log & Evidence Snapshots</h2>
+                    <p class="section-desc">Persistent record stored in local SQLite database with timestamped evidence frames.</p>
+                </div>
+                <div class="header-actions">
+                    <button class="btn btn-outline" onclick="fetchEvents()">↻ Refresh</button>
+                    <button class="btn btn-outline-danger" onclick="confirmClearEvents()">🗑 Clear Test Events</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="events-table">
+                        <thead>
+                            <tr>
+                                <th>Event ID</th>
+                                <th>Timestamp</th>
+                                <th>Type</th>
+                                <th>Faces</th>
+                                <th>Details / Explanation</th>
+                                <th>Evidence Snapshot</th>
+                            </tr>
+                        </thead>
+                        <tbody id="eventsTableBody">
+                            <tr>
+                                <td colspan="6" class="text-center text-muted">No proctoring anomalies recorded yet.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <p>MacBook Proctored Session • Local-first Processing • Localhost Bind Only</p>
+        </footer>
+    </div>
+
+    <!-- Snapshot Modal -->
+    <div id="imageModal" class="modal hidden" onclick="closeModal()">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <span class="modal-close" onclick="closeModal()">&times;</span>
+            <h3 id="modalTitle">Evidence Snapshot</h3>
+            <img id="modalImage" src="" alt="Snapshot Preview">
+            <p id="modalCaption" class="modal-caption"></p>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

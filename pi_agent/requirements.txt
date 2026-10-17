@@ -1,0 +1,10 @@
+# Raspberry Pi Dependencies
+# Install these on Raspberry Pi OS inside a virtual environment:
+# python3 -m venv ~/pi_venv && source ~/pi_venv/bin/activate
+
+flask>=3.0.0,<4.0.0
+
+# Optional hardware libraries - install ONLY on the physical Raspberry Pi:
+# gpiozero>=2.0
+# pigpio>=1.78
+# RPi.GPIO>=0.7.1
