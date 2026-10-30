@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Python virtual environment
 .venv/
 venv/
@@ -31,3 +32,20 @@ htmlcov/
 # IDE / Editor configuration
 .vscode/
 .idea/
+=======
+# colcon workspace artifacts
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+>>>>>>> 444e178fd5a2eacf491f8f3d5213fc2004414a0e
