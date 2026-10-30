@@ -43,14 +43,21 @@ def create_app(
     app = Flask(__name__)
     app.config["SECRET_KEY"] = Config.SECRET_KEY
 
+    device_id = (override_config and override_config.get("DEVICE_ID")) or Config.DEVICE_ID
+    candidate_name = (override_config and override_config.get("CANDIDATE_NAME")) or Config.CANDIDATE_NAME
+    camera_idx = (override_config and override_config.get("CAMERA_INDEX")) or Config.CAMERA_INDEX
+    camera_source = (override_config and override_config.get("CAMERA_SOURCE")) or Config.CAMERA_SOURCE
+
     # Instantiate single shared services
     camera = CameraManager.get_instance(
-        camera_index=Config.CAMERA_INDEX,
+        camera_index=camera_idx,
         backend_name=Config.CAMERA_BACKEND,
         width=Config.FRAME_WIDTH,
         height=Config.FRAME_HEIGHT,
         fps=Config.TARGET_FPS,
         synthetic=synthetic_camera,
+        auto_detect=Config.CAMERA_AUTO_DETECT,
+        camera_source=camera_source,
     )
 
     detector = FaceDetector()
@@ -63,6 +70,8 @@ def create_app(
         shared_token=Config.PI_SHARED_TOKEN,
         timeout_sec=Config.PI_TIMEOUT_SEC,
         enabled=Config.PI_ENABLED,
+        device_id=device_id,
+        candidate_name=candidate_name,
     )
 
     monitoring_service = MonitoringService(
@@ -72,6 +81,9 @@ def create_app(
         pi_client=pi_client,
         face_absence_threshold_sec=Config.FACE_ABSENCE_THRESHOLD_SEC,
         multiple_faces_threshold_sec=Config.MULTIPLE_FACES_THRESHOLD_SEC,
+        device_id=device_id,
+        candidate_name=candidate_name,
+        send_evidence=Config.EVIDENCE_THUMBNAIL_ON_ALERT,
     )
 
     # Attach services to app context for access in route handlers and tests
@@ -91,6 +103,8 @@ def create_app(
             multiple_threshold=Config.MULTIPLE_FACES_THRESHOLD_SEC,
             pi_enabled=Config.PI_ENABLED,
             pi_base_url=Config.PI_BASE_URL,
+            device_id=device_id,
+            candidate_name=candidate_name,
         )
 
     # --- Video Streaming Route ---
@@ -155,6 +169,7 @@ def create_app(
             "camera": {
                 "online": cam_status.is_open,
                 "index": cam_status.camera_index,
+                "label": cam_status.camera_label,
                 "backend": cam_status.backend,
                 "width": cam_status.width,
                 "height": cam_status.height,
@@ -168,6 +183,37 @@ def create_app(
                 "last_error": pi_status.last_error,
             },
             "event_counts": telemetry.event_counts,
+        })
+
+    @app.route("/api/cameras", methods=["GET"])
+    def get_cameras():
+        """List available local cameras (native and external)."""
+        available = camera.get_available_cameras()
+        return jsonify({
+            "cameras": available,
+            "active_index": camera.camera_index,
+            "active_label": camera.camera_label,
+        })
+
+    @app.route("/api/camera/select", methods=["POST"])
+    def select_camera():
+        """Switch active camera to target index (e.g. native 0 or external 1)."""
+        data = request.get_json(silent=True) or {}
+        new_index = data.get("camera_index")
+        if new_index is None:
+            return jsonify({"error": "Missing camera_index"}), 400
+
+        try:
+            new_index = int(new_index)
+        except ValueError:
+            return jsonify({"error": "camera_index must be an integer"}), 400
+
+        success = camera.switch_camera(new_index)
+        return jsonify({
+            "success": success,
+            "active_index": camera.camera_index,
+            "active_label": camera.camera_label,
+            "online": camera.get_status().is_open,
         })
 
     @app.route("/api/session/start", methods=["POST"])

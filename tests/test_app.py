@@ -59,3 +59,20 @@ def test_evidence_directory_traversal_protection(client):
     """Attempts to traverse directory paths via evidence endpoint are blocked."""
     resp = client.get("/evidence/../../etc/passwd")
     assert resp.status_code in (400, 404)
+
+
+def test_camera_listing_and_selection(client):
+    """Camera endpoint lists cameras and supports dynamic switching."""
+    resp = client.get("/api/cameras")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert "cameras" in data
+    assert "active_index" in data
+
+    # Switch camera endpoint
+    switch_resp = client.post("/api/camera/select", json={"camera_index": 0})
+    assert switch_resp.status_code == 200
+    switch_data = switch_resp.get_json()
+    assert "success" in switch_data
+    assert switch_data["active_index"] == 0
+

@@ -9,7 +9,45 @@ document.addEventListener("DOMContentLoaded", () => {
 function initDashboard() {
     pollStatus();
     fetchEvents();
+    fetchAvailableCameras();
     pollInterval = setInterval(pollStatus, 1000);
+}
+
+// --- Camera Management ---
+async function fetchAvailableCameras() {
+    try {
+        const response = await fetch("/api/cameras");
+        if (!response.ok) return;
+        const data = await response.json();
+        const select = document.getElementById("cameraSelect");
+        if (!select || !data.cameras || data.cameras.length === 0) return;
+
+        select.innerHTML = data.cameras.map(cam => {
+            const isSelected = cam.index === data.active_index ? "selected" : "";
+            return `<option value="${cam.index}" ${isSelected}>${escapeHtml(cam.label)} (${cam.width}x${cam.height})</option>`;
+        }).join("");
+    } catch (e) {
+        console.warn("Could not load camera list:", e);
+    }
+}
+
+async function changeCameraSource(newIndex) {
+    try {
+        const response = await fetch("/api/camera/select", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ camera_index: parseInt(newIndex, 10) })
+        });
+        const data = await response.json();
+        if (data.success) {
+            setTimeout(retryStream, 300);
+            pollStatus();
+        } else {
+            alert("Failed to switch camera. Check if device is connected.");
+        }
+    } catch (e) {
+        console.error("Camera switch error:", e);
+    }
 }
 
 // --- Telemetry Polling ---

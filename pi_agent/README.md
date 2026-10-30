@@ -91,18 +91,19 @@ PI_TIMEOUT_SEC=2.0
 
 ---
 
-## 4. Live Browser Dashboard on the Raspberry Pi
+## 4. Live Multi-Workstation Command Center on Raspberry Pi
 
-The Raspberry Pi serves an independent, real-time live monitoring dashboard:
+The Raspberry Pi serves an institutional, real-time command center:
 
-👉 **`http://<RASPBERRY_PI_IP>:5050/`** (e.g. `http://192.168.43.125:5050/`)
+👉 **`http://<RASPBERRY_PI_IP>:5050/`** (e.g. `http://172.20.10.2:5050/`)
 
-### Dashboard Features:
-- **Clean Institutional Theme**: Consistent white and slate palette, zero emojis, high-contrast typography.
-- **Hero Status Banner**: Displays live proctoring state (`NORMAL` in green, `ALERT` in crimson, or `AWAITING CONNECTION` in slate).
-- **Servo Indicator**: Shows current indicator position (`Normal (-45°)` vs `Alert (+45°)`) and hardware mode (`Dry-Run Simulation` vs `Physical Active`).
-- **Telemetry Tiles**: Face count, active anomaly type, alert counter, and seconds since last update.
-- **Audit Table**: Shows received status updates with timestamps and proctor explanation notes.
+### Command Center Features:
+- **Professional Command Center Dark Theme**: Refined high-contrast dark palette (`#090d16` / `#0f172a`), Inter and JetBrains Mono typography, glowing status dots, zero clutter.
+- **Audible & Visual Alert Engine**: Dual-tone synthesized alarm chimes (Web Audio API) when any student triggers an alert, accompanied by an animated sliding banner with direct triage buttons.
+- **Candidate Snapshot Ingestion**: Receives synchronized JPEG incident snapshots directly from student laptops and displays candidate photos on workstation cards and in dossier previews.
+- **Workstation Grid & Candidate Dossiers**: Displays live status of every workstation (`DESK-01`, `DESK-02`, etc.), face counts, alert durations, IP addresses, and ping latency.
+- **Proctor Controls**: One-click "Acknowledge Alert" (per desk or hall-wide), "Prune Offline Desks", "Simulate Exam Hall (4 Desks)", and "Export Report" (JSON/CSV).
+- **Servo Indicator & Needle Gauge**: Real-time physical indicator needle showing -45° Nominal, 0° Idle, and +45° Alert with GPIO pin tracking.
 
 ---
 
@@ -110,36 +111,38 @@ The Raspberry Pi serves an independent, real-time live monitoring dashboard:
 
 | Endpoint | Method | Auth Required | Purpose |
 |---|---|---|---|
-| `/` | GET | No | Live Status Web Dashboard |
-| `/health` | GET | No | Liveness probe for MacBook client |
+| `/` | GET | No | Real Exam Proctoring Command Center UI |
+| `/health` | GET | No | Liveness probe for student laptop clients |
 | `/api/status` | GET | No | Real-time JSON telemetry for browser polling |
-| `/status` | POST | **Yes** (Bearer) | Receives proctoring status and actuates servo |
+| `/status` | POST | **Yes** (Bearer) | Receives candidate status, face count & optional snapshot |
+| `/api/workstation/<id>/acknowledge` | POST | **Yes** | Acknowledges alert for a specific workstation |
+| `/api/acknowledge_all` | POST | **Yes** | Acknowledges all active alerts in the hall |
+| `/api/export_report` | GET | No | Downloads complete session audit report (JSON) |
+| `/api/simulate_multi` | POST | **Yes** | Populates 4 simulated candidate stations for demo |
 | `/test_servo` | POST | **Yes** (Bearer) | Manually triggers test servo movement |
+| `/api/clear_inactive` | POST | **Yes** (Bearer) | Prunes offline workstations |
 | `/api/clear_history` | POST | **Yes** (Bearer) | Resets in-memory event history |
 
 ---
 
-## 6. Testing Communication from MacBook
+## 6. Running Multiple Student Workstations to One Pi
 
-### Health Check:
+Each student laptop runs the client proctoring service pointing to the singular Raspberry Pi:
+
+### Student Laptop 1 (Desk 01 - Native Camera):
 ```bash
-curl -s http://192.168.43.125:5050/health
+python run.py --device-id DESK-01 --candidate-name "Alice Smith" --camera native --pi-url http://172.20.10.2:5050
 ```
 
-### Send Authenticated Status:
+### Student Laptop 2 (Desk 02 - External USB Camera):
 ```bash
-curl -X POST http://192.168.43.125:5050/status \
-  -H "Authorization: Bearer your_secure_shared_secret" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "status": "ALERT",
-    "event_type": "FACE_ABSENT",
-    "face_count": 0,
-    "explanation": "Candidate absent from camera frame for 5.0 seconds."
-  }'
+python run.py --device-id DESK-02 --candidate-name "Bob Jones" --camera external --pi-url http://172.20.10.2:5050
 ```
 
-The Pi dashboard at `http://192.168.43.125:5050/` will instantly update to show `ALERT`, update the telemetry, and record the entry in the table.
+### Student Laptop 3 (Desk 03 - Auto-detect Camera):
+```bash
+python run.py --device-id DESK-03 --candidate-name "Charlie Davis" --camera auto --pi-url http://172.20.10.2:5050
+```
 
 ---
 

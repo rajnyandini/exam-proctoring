@@ -13,6 +13,8 @@ import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
+import base64
+import cv2
 import numpy as np
 
 from proctor.camera import CameraManager
@@ -51,11 +53,18 @@ class MonitoringService:
         face_absence_threshold_sec: float = 5.0,
         multiple_faces_threshold_sec: float = 2.0,
         camera_error_threshold_sec: float = 3.0,
+        device_id: str = "DESK-01",
+        candidate_name: str = "Candidate",
+        send_evidence: bool = False,
     ) -> None:
         self.camera = camera
         self.detector = detector
         self.logger_service = logger_service
         self.pi_client = pi_client
+
+        self.device_id = device_id
+        self.candidate_name = candidate_name
+        self.send_evidence = send_evidence
 
         self.face_absence_threshold_sec = face_absence_threshold_sec
         self.multiple_faces_threshold_sec = multiple_faces_threshold_sec
@@ -64,6 +73,7 @@ class MonitoringService:
         self._lock = threading.Lock()
         self._is_running = False
         self._worker_thread: Optional[threading.Thread] = None
+        self._last_pi_notify_mono = 0.0
 
         # Session tracking
         self.session_id = "proctor_session_0"
@@ -118,13 +128,16 @@ class MonitoringService:
             )
             self._worker_thread.start()
 
-            logger.info(f"Proctoring session '{self.session_id}' started.")
+            logger.info(f"Proctoring session '{self.session_id}' started ({self.device_id}).")
+            self._last_pi_notify_mono = time.monotonic()
             # Notify Pi of session start in normal state
             self.pi_client.notify_status(
                 status="NORMAL",
                 event_type="NORMAL",
                 face_count=1,
                 explanation=f"Session {self.session_id} started.",
+                device_id=self.device_id,
+                candidate_name=self.candidate_name,
             )
             return self.session_id
 
@@ -147,8 +160,10 @@ class MonitoringService:
             event_type="NORMAL",
             face_count=0,
             explanation=f"Session {self.session_id} ended.",
+            device_id=self.device_id,
+            candidate_name=self.candidate_name,
         )
-        logger.info(f"Proctoring session '{self.session_id}' stopped.")
+        logger.info(f"Proctoring session '{self.session_id}' stopped ({self.device_id}).")
 
     def _evaluation_loop(self) -> None:
         """Continuous frame processing and temporal state evaluation loop."""
@@ -196,6 +211,22 @@ class MonitoringService:
                 self._current_face_count = face_count
                 self._detected_faces = faces
 
+            # Send periodic heartbeat to Raspberry Pi to maintain multi-workstation active state
+            if now_mono - self._last_pi_notify_mono >= 4.0:
+                self._last_pi_notify_mono = now_mono
+                self.pi_client.notify_status(
+                    status="NORMAL" if self._active_anomaly is None else "ALERT",
+                    event_type=self._active_anomaly or "NORMAL",
+                    face_count=face_count,
+                    explanation=(
+                        f"Nominal candidate presence ({self.device_id})."
+                        if self._active_anomaly is None
+                        else f"Active anomaly ({self._active_anomaly})"
+                    ),
+                    device_id=self.device_id,
+                    candidate_name=self.candidate_name,
+                )
+
             # Sleep to pace loop near camera frame rate
             loop_elapsed = time.monotonic() - loop_start
             target_interval = 1.0 / max(1, self.camera.fps)
@@ -222,12 +253,32 @@ class MonitoringService:
                     frame=None,
                     is_camera_fault=True,
                 )
+                self._last_pi_notify_mono = now_mono
                 self.pi_client.notify_status(
                     status="ALERT",
                     event_type="CAMERA_ERROR",
                     face_count=0,
                     explanation="Camera stream lost.",
+                    device_id=self.device_id,
+                    candidate_name=self.candidate_name,
                 )
+
+    @staticmethod
+    def _encode_thumbnail(frame: Optional[np.ndarray]) -> Optional[str]:
+        """Encode a lightweight JPEG base64 data URI for remote alert evidence."""
+        if frame is None or frame.size == 0:
+            return None
+        try:
+            h, w = frame.shape[:2]
+            target_w = 320
+            target_h = int(h * (target_w / max(1, w)))
+            thumb = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+            ret, buf = cv2.imencode(".jpg", thumb, [int(cv2.IMWRITE_JPEG_QUALITY), 65])
+            if ret:
+                return "data:image/jpeg;base64," + base64.b64encode(buf).decode("utf-8")
+        except Exception as e:
+            logger.debug(f"Failed to encode alert thumbnail: {e}")
+        return None
 
     def _update_temporal_state(
         self,
@@ -251,11 +302,14 @@ class MonitoringService:
                     f"Anomaly condition '{self._active_anomaly}' resolved. Normal proctoring restored."
                 )
                 self._active_anomaly = None
+                self._last_pi_notify_mono = now_mono
                 self.pi_client.notify_status(
                     status="NORMAL",
                     event_type="NORMAL",
                     face_count=1,
                     explanation="Normal candidate presence restored.",
+                    device_id=self.device_id,
+                    candidate_name=self.candidate_name,
                 )
 
             self._current_status = "NORMAL"
@@ -285,12 +339,18 @@ class MonitoringService:
                         session_id=self.session_id,
                         frame=frame,
                     )
-                    self.pi_client.notify_status(
-                        status="ALERT",
-                        event_type="FACE_ABSENT",
-                        face_count=0,
-                        explanation=explanation,
-                    )
+                    self._last_pi_notify_mono = now_mono
+                    notify_kw = {
+                        "status": "ALERT",
+                        "event_type": "FACE_ABSENT",
+                        "face_count": 0,
+                        "explanation": explanation,
+                        "device_id": self.device_id,
+                        "candidate_name": self.candidate_name,
+                    }
+                    if self.send_evidence:
+                        notify_kw["evidence_image"] = self._encode_thumbnail(frame)
+                    self.pi_client.notify_status(**notify_kw)
 
                 self._current_status = "FACE ABSENT"
                 return "ALERT: FACE ABSENT", True
@@ -324,12 +384,18 @@ class MonitoringService:
                         session_id=self.session_id,
                         frame=frame,
                     )
-                    self.pi_client.notify_status(
-                        status="ALERT",
-                        event_type="MULTIPLE_FACES",
-                        face_count=face_count,
-                        explanation=explanation,
-                    )
+                    self._last_pi_notify_mono = now_mono
+                    notify_kw_mul = {
+                        "status": "ALERT",
+                        "event_type": "MULTIPLE_FACES",
+                        "face_count": face_count,
+                        "explanation": explanation,
+                        "device_id": self.device_id,
+                        "candidate_name": self.candidate_name,
+                    }
+                    if self.send_evidence:
+                        notify_kw_mul["evidence_image"] = self._encode_thumbnail(frame)
+                    self.pi_client.notify_status(**notify_kw_mul)
 
                 self._current_status = "MULTIPLE FACES"
                 return f"ALERT: {face_count} FACES DETECTED", True

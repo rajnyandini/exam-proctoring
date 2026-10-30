@@ -21,13 +21,16 @@
                 </div>
             </div>
             <div class="header-status-group">
+                <div class="device-pill" id="workstationBadge" title="Assigned Workstation">
+                    <span>&#128187; {{ device_id }} &bull; {{ candidate_name }}</span>
+                </div>
                 <div id="statusBadge" class="status-badge status-normal">
                     <span class="status-dot"></span>
                     <span id="statusText">INITIALIZING</span>
                 </div>
                 <div class="device-pill" id="piBadge">
                     <span class="device-dot"></span>
-                    <span id="piStatusText">Raspberry Pi: {{ 'Online' if pi_enabled else 'Disabled' }}</span>
+                    <span id="piStatusText">Raspberry Pi Hub: {{ 'Connected' if pi_enabled else 'Disabled' }}</span>
                 </div>
             </div>
         </header>
@@ -47,7 +50,16 @@
             <!-- Left Column: Video Capture & Controls -->
             <section class="panel video-panel">
                 <div class="panel-header">
-                    <h2 class="panel-title">Live Video Feed</h2>
+                    <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+                        <h2 class="panel-title">Live Video Feed</h2>
+                        <div class="camera-select-container">
+                            <label for="cameraSelect" style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-right: 4px;">Camera:</label>
+                            <select id="cameraSelect" onchange="changeCameraSource(this.value)" style="background: var(--bg-subtle); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 4px 8px; font-size: 12px; color: var(--text-main); font-weight: 600; cursor: pointer;">
+                                <option value="0">Native Laptop Camera</option>
+                                <option value="1">External USB Webcam</option>
+                            </select>
+                        </div>
+                    </div>
                     <span class="spec-label" id="cameraSpecBadge">AVFOUNDATION &bull; 640&times;480 &bull; 15 FPS</span>
                 </div>
                 <div class="panel-body">

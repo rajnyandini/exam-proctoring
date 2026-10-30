@@ -82,6 +82,8 @@ def test_face_absence_threshold_and_suppression(mock_monitoring):
         event_type="FACE_ABSENT",
         face_count=0,
         explanation=events[0]["explanation"],
+        device_id="DESK-01",
+        candidate_name="Candidate",
     )
 
     # T=7.0: Condition persists -> DUPLICATE EVENT MUST BE SUPPRESSED
@@ -110,6 +112,8 @@ def test_face_absence_reset_and_retrigger(mock_monitoring):
         event_type="NORMAL",
         face_count=1,
         explanation="Normal candidate presence restored.",
+        device_id="DESK-01",
+        candidate_name="Candidate",
     )
 
     # Candidate disappears again at T=10.0

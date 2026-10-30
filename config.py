@@ -26,12 +26,21 @@ class Config:
     DATA_DIR: Path = BASE_DIR / os.getenv("DATA_DIR", "data")
     DB_PATH: Path = BASE_DIR / os.getenv("DB_PATH", "data/proctoring.db")
 
-    # Camera settings
+    # Workstation / Device identification (for multi-device proctoring)
+    import socket
+    _default_host = socket.gethostname().split(".")[0].upper()
+    DEVICE_ID: str = os.getenv("DEVICE_ID", f"DESK-{_default_host}")
+    CANDIDATE_NAME: str = os.getenv("CANDIDATE_NAME", "Candidate")
+
+    # Camera settings (support native laptop camera or external USB webcam)
+    CAMERA_SOURCE: str = os.getenv("CAMERA_SOURCE", "auto").strip().lower()  # auto, native, external, or integer index
     CAMERA_INDEX: int = int(os.getenv("CAMERA_INDEX", "0"))
+    CAMERA_AUTO_DETECT: bool = os.getenv("CAMERA_AUTO_DETECT", "true").strip().lower() in ("true", "1", "yes")
     CAMERA_BACKEND: str = os.getenv("CAMERA_BACKEND", "AVFOUNDATION").upper()
     FRAME_WIDTH: int = int(os.getenv("FRAME_WIDTH", "640"))
     FRAME_HEIGHT: int = int(os.getenv("FRAME_HEIGHT", "480"))
     TARGET_FPS: int = int(os.getenv("TARGET_FPS", "15"))
+    EVIDENCE_THUMBNAIL_ON_ALERT: bool = os.getenv("EVIDENCE_THUMBNAIL_ON_ALERT", "true").strip().lower() in ("true", "1", "yes")
 
     # Proctoring thresholds (monotonic duration in seconds)
     FACE_ABSENCE_THRESHOLD_SEC: float = float(os.getenv("FACE_ABSENCE_THRESHOLD_SEC", "5.0"))

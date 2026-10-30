@@ -1,14 +1,24 @@
 
+import sys
 import cv2
 import time
 
-camera = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
+cam_index = 0
+if len(sys.argv) > 1:
+    try:
+        cam_index = int(sys.argv[1])
+    except ValueError:
+        cam_index = 0
+
+label = "Native Laptop Camera" if cam_index == 0 else f"External USB Camera (Index {cam_index})"
+print(f"Connecting to {label} (Index {cam_index})...")
+camera = cv2.VideoCapture(cam_index, cv2.CAP_AVFOUNDATION)
 camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
 camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 camera.set(cv2.CAP_PROP_FPS, 15)
 
 if not camera.isOpened():
-    print("Could not open webcam.")
+    print(f"Could not open webcam on index {cam_index}.")
     raise SystemExit(1)
 
 cascade_path = (

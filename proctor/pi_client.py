@@ -33,11 +33,15 @@ class RaspberryPiClient:
         shared_token: str = "",
         timeout_sec: float = 2.0,
         enabled: bool = False,
+        device_id: str = "DESK-01",
+        candidate_name: str = "Candidate",
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.shared_token = shared_token
         self.timeout_sec = timeout_sec
         self.enabled = enabled
+        self.device_id = device_id
+        self.candidate_name = candidate_name
 
         self._session = requests.Session()
         self._is_online = False
@@ -86,11 +90,15 @@ class RaspberryPiClient:
         face_count: int = 1,
         explanation: str = "Candidate present and monitored.",
         timestamp: Optional[str] = None,
+        device_id: Optional[str] = None,
+        candidate_name: Optional[str] = None,
+        evidence_image: Optional[str] = None,
     ) -> bool:
         """Send authenticated status payload to the Raspberry Pi.
 
         status: 'NORMAL' | 'ALERT'
         event_type: 'NORMAL' | 'FACE_ABSENT' | 'MULTIPLE_FACES' | 'CAMERA_ERROR'
+        evidence_image: Optional base64 encoded JPEG thumbnail of the incident
         """
         if not self.enabled:
             logger.debug("Pi integration disabled. Skipping status transmission.")
@@ -100,6 +108,9 @@ class RaspberryPiClient:
             from datetime import datetime, timezone
             timestamp = datetime.now(timezone.utc).astimezone().isoformat()
 
+        active_device = device_id or self.device_id
+        active_candidate = candidate_name or self.candidate_name
+
         url = f"{self.base_url}/status"
         payload: Dict[str, Any] = {
             "status": status,
@@ -107,7 +118,11 @@ class RaspberryPiClient:
             "face_count": face_count,
             "explanation": explanation,
             "timestamp": timestamp,
+            "device_id": active_device,
+            "candidate_name": active_candidate,
         }
+        if evidence_image:
+            payload["evidence_image"] = evidence_image
 
         try:
             resp = self._session.post(

@@ -8,9 +8,9 @@ A local-first, modular exam proctoring prototype designed to run real-time compu
 
 ---
 
-## 1. System Architecture
+## 1. System Architecture: Multi-Device Proctoring to Singular Raspberry Pi Hub
 
-The MacBook performs all video capture and computer vision processing. The Raspberry Pi handles hardware alert indication only.
+Multiple candidate workstations (student laptops or desktop computers across an examination hall) run real-time camera proctoring using their **native laptop webcam** or an **external USB camera**. Each workstation continuously tracks candidate presence, logs incidents locally, and sends authenticated, real-time alert telemetry (along with evidence snapshots) to a **singular Raspberry Pi 3 Model B Command Center**.
 
 ```
 +-------------------------------------------------------------------------------+
@@ -172,36 +172,60 @@ macOS restricts camera access at the operating system level.
 
 ---
 
-## 4. Running the Application
+## 4. Running Workstations (Native or External Camera) & Connecting to Raspberry Pi
 
-### Option A: Standard Mode (Physical Webcam)
+### A. Camera Selection (Native Laptop Camera vs. External USB Camera)
+
+The system automatically detects and manages both built-in laptop webcams and external USB cameras:
+
+1. **Scan available cameras**:
+   ```bash
+   python run.py --list-cameras
+   ```
+2. **Force Native Laptop Camera (Index 0)**:
+   ```bash
+   python run.py --camera native
+   ```
+3. **Use External USB Webcam (Prioritizes external indices 1/2, falls back to native if unplugged)**:
+   ```bash
+   python run.py --camera external
+   ```
+4. **Auto-Detect Mode**:
+   ```bash
+   python run.py --camera auto
+   ```
+5. **Switching Cameras On-The-Fly**:
+   In the candidate dashboard (`http://127.0.0.1:5001`), use the **Camera** dropdown in the video panel header to switch dynamically between native and external cameras without restarting the server!
+
+---
+
+### B. Launching Multiple Student Laptops to a Singular Raspberry Pi Hub
+
+To run an exam across multiple candidate laptops sending real-time alerts and snapshots to the central Raspberry Pi:
+
+#### Candidate Laptop 1 (Desk 01 - Native Camera):
 ```bash
-python run.py
-```
-Output:
-```
-=================================================================
-        AI-POWERED EXAM PROCTORING SYSTEM (PROTOTYPE)
-=================================================================
- * Dashboard URL:      http://127.0.0.1:5001
- * Camera Backend:     AVFOUNDATION (Index: 0)
- * Requested Capture:  640x480 @ 15 FPS
- * Absence Threshold:  5.0 seconds
- * Multiple Threshold: 2.0 seconds
- * Database Path:      /Users/bhallarunbir539/exam_proctoring/data/proctoring.db
- * Evidence Folder:    /Users/bhallarunbir539/exam_proctoring/evidence
- * Raspberry Pi Link:  DISABLED (Local Only)
- * Synthetic Camera:   NO (Hardware Webcam)
-=================================================================
+python run.py --device-id DESK-01 --candidate-name "Sarah Connor" --camera native --pi-url http://172.20.10.2:5050
 ```
 
-Open your browser to:
-👉 **`http://127.0.0.1:5001`**
-
-### Option B: Synthetic Test Camera Mode (Headless / No Webcam Attached)
-To run or demo the application without connecting a physical webcam:
+#### Candidate Laptop 2 (Desk 02 - External USB Camera):
 ```bash
-python run.py --synthetic --port 5001
+python run.py --device-id DESK-02 --candidate-name "Alex Mercer" --camera external --pi-url http://172.20.10.2:5050
+```
+
+#### Candidate Laptop 3 (Desk 03):
+```bash
+python run.py --device-id DESK-03 --candidate-name "Elena Fisher" --camera auto --pi-url http://172.20.10.2:5050
+```
+
+*(Replace `172.20.10.2` with your Raspberry Pi's actual IP address on your Wi-Fi or mobile hotspot).*
+
+---
+
+### C. Synthetic Test Camera Mode (Headless / No Webcam Attached)
+To run or demo a student workstation without connecting a physical webcam:
+```bash
+python run.py --synthetic --device-id DESK-TEST --candidate-name "Demo Student" --port 5001
 ```
 
 ### Stopping the Application

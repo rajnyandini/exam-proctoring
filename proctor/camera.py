@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 class CameraStatus:
     is_open: bool
     camera_index: int
+    camera_label: str
     backend: str
     width: int
     height: int
@@ -35,6 +36,7 @@ class CameraManager:
 
     Maintains a single VideoCapture instance running in a dedicated thread to
     prevent resource contention and excessive buffering on macOS AVFoundation.
+    Supports auto-detecting native laptop camera or external USB webcams.
     """
 
     _instance: Optional["CameraManager"] = None
@@ -48,6 +50,8 @@ class CameraManager:
         height: int = 480,
         fps: int = 15,
         synthetic: bool = False,
+        auto_detect: bool = True,
+        camera_source: str = "auto",
     ) -> None:
         self.camera_index = camera_index
         self.backend_name = backend_name
@@ -55,6 +59,11 @@ class CameraManager:
         self.height = height
         self.fps = fps
         self.synthetic = synthetic
+        self.auto_detect = auto_detect
+        self.camera_source = str(camera_source).strip().lower()
+        self.camera_label = (
+            "Native Laptop Camera" if camera_index == 0 else f"External USB Webcam (Index {camera_index})"
+        )
 
         self._cap: Optional[cv2.VideoCapture] = None
         self._thread: Optional[threading.Thread] = None
@@ -87,6 +96,66 @@ class CameraManager:
             return cv2.CAP_AVFOUNDATION
         return cv2.CAP_ANY
 
+    @classmethod
+    def scan_available_cameras(cls, backend_name: str = "AVFOUNDATION", max_probe: int = 3) -> List[Dict[str, Any]]:
+        """Probe connected camera devices and return descriptive metadata."""
+        cameras: List[Dict[str, Any]] = []
+        backend = cv2.CAP_AVFOUNDATION if (backend_name == "AVFOUNDATION" and sys.platform == "darwin") else cv2.CAP_ANY
+
+        for idx in range(max_probe):
+            try:
+                cap = cv2.VideoCapture(idx, backend)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret and frame is not None:
+                        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        label = "Native Laptop Camera" if idx == 0 else f"External USB Webcam (Index {idx})"
+                        cameras.append({
+                            "index": idx,
+                            "label": label,
+                            "is_native": idx == 0,
+                            "is_external": idx > 0,
+                            "width": w,
+                            "height": h,
+                            "available": True,
+                        })
+                    cap.release()
+            except Exception as e:
+                logger.debug(f"Camera index {idx} scan error: {e}")
+        return cameras
+
+    def get_available_cameras(self) -> List[Dict[str, Any]]:
+        """List available cameras with indicator for the active camera."""
+        if self.synthetic:
+            return [{
+                "index": -1,
+                "label": "Synthetic Test Camera",
+                "is_native": False,
+                "is_external": False,
+                "width": self.width,
+                "height": self.height,
+                "available": True,
+                "active": True,
+            }]
+
+        cameras = self.scan_available_cameras(self.backend_name)
+        for cam in cameras:
+            cam["active"] = (cam["index"] == self.camera_index and self._running)
+        return cameras
+
+    def switch_camera(self, new_index: int) -> bool:
+        """Switch camera device at runtime without restarting the application."""
+        with self._instance_lock:
+            logger.info(f"Switching active camera to index {new_index}...")
+            self.stop()
+            self.camera_index = new_index
+            self.camera_source = str(new_index)
+            self.camera_label = (
+                "Native Laptop Camera" if new_index == 0 else f"External USB Webcam (Index {new_index})"
+            )
+            return self.start()
+
     def start(self) -> bool:
         """Open the camera and start the background frame capture loop."""
         with self._frame_lock:
@@ -102,40 +171,81 @@ class CameraManager:
                 return True
 
             backend = self._resolve_backend()
-            logger.info(
-                f"Opening camera index {self.camera_index} with backend {self.backend_name}..."
-            )
-            try:
-                self._cap = cv2.VideoCapture(self.camera_index, backend)
-            except Exception as e:
-                self._error_message = f"Exception opening camera: {e}"
-                logger.error(self._error_message)
-                return False
 
-            if not self._cap.isOpened():
+            # Determine probing order based on camera_source
+            indices_to_try: List[int] = []
+            if self.camera_source == "external":
+                logger.info("External camera requested. Probing external camera indices [1, 2] first...")
+                indices_to_try = [1, 2]
+                if self.auto_detect:
+                    indices_to_try.append(0)  # Graceful fallback to native if external missing
+            elif self.camera_source == "native":
+                logger.info("Native laptop camera requested. Probing index 0...")
+                indices_to_try = [0]
+                if self.auto_detect:
+                    indices_to_try.extend([1, 2])
+            elif self.camera_source.isdigit():
+                indices_to_try = [int(self.camera_source)]
+                if self.auto_detect:
+                    for alt in [0, 1, 2]:
+                        if alt not in indices_to_try:
+                            indices_to_try.append(alt)
+            else:  # "auto" or default
+                indices_to_try = [self.camera_index]
+                if self.auto_detect:
+                    for alt in [0, 1, 2]:
+                        if alt not in indices_to_try:
+                            indices_to_try.append(alt)
+
+            opened_cap = None
+            for idx in indices_to_try:
+                try:
+                    test_cap = cv2.VideoCapture(idx, backend)
+                    if test_cap.isOpened():
+                        # Set capture properties
+                        test_cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                        test_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                        test_cap.set(cv2.CAP_PROP_FPS, self.fps)
+                        success, frame = test_cap.read()
+                        if success and frame is not None:
+                            opened_cap = test_cap
+                            self.camera_index = idx
+                            self.camera_label = (
+                                "Native Laptop Camera"
+                                if idx == 0
+                                else f"External USB Webcam (Index {idx})"
+                            )
+                            logger.info(
+                                f"Successfully opened {self.camera_label} on index {idx}."
+                            )
+                            break
+                        else:
+                            test_cap.release()
+                    else:
+                        test_cap.release()
+                except Exception as e:
+                    logger.debug(f"Camera index {idx} probe error: {e}")
+
+            if opened_cap is None:
                 diag = (
                     "Could not open camera. Possible causes:\n"
                     "1. macOS Camera permission denied. Grant camera access to Terminal/IDE in:\n"
                     "   System Settings > Privacy & Security > Camera.\n"
                     "2. External USB webcam disconnected or in use by another application.\n"
-                    f"3. Invalid camera index (currently requested: {self.camera_index})."
+                    f"3. Probed indices {indices_to_try} all failed to provide frames."
                 )
                 self._error_message = diag
                 logger.error(diag)
                 self._cap = None
                 return False
 
-            # Configure resolution and target frame rate for smooth low-CPU capture
-            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-            self._cap.set(cv2.CAP_PROP_FPS, self.fps)
-
+            self._cap = opened_cap
             # Read actual configured properties
             actual_w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             actual_h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             actual_fps = int(self._cap.get(cv2.CAP_PROP_FPS))
             logger.info(
-                f"Camera opened successfully. Resolution: {actual_w}x{actual_h}, FPS: {actual_fps}"
+                f"{self.camera_label} active. Resolution: {actual_w}x{actual_h}, FPS: {actual_fps}"
             )
 
             self._running = True
@@ -211,6 +321,7 @@ class CameraManager:
             return CameraStatus(
                 is_open=is_open,
                 camera_index=self.camera_index,
+                camera_label=self.camera_label,
                 backend=self.backend_name,
                 width=self.width,
                 height=self.height,

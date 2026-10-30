@@ -15,7 +15,7 @@ TEST_TOKEN = "secret_test_token_12345"
 def pi_client():
     """Flask test client for pi_server."""
     pi_app.config["TESTING"] = True
-    monitor_state.clear_history()
+    monitor_state.reset()
     with patch("pi_agent.pi_server.SHARED_TOKEN", TEST_TOKEN):
         with pi_app.test_client() as client:
             yield client
@@ -160,3 +160,160 @@ def test_pi_client_offline_graceful_handling():
     # Status notification should return False, not crash
     assert offline_client.notify_status(status="ALERT", event_type="FACE_ABSENT") is False
     assert offline_client.get_status().online is False
+
+
+def test_multi_workstation_command_center(pi_client):
+    """Multiple candidate devices report status; hall-wide status aggregates correctly."""
+    headers = {"Authorization": f"Bearer {TEST_TOKEN}"}
+
+    # Station 1 reports NORMAL
+    resp1 = pi_client.post(
+        "/status",
+        headers=headers,
+        json={
+            "device_id": "DESK-01",
+            "candidate_name": "Alice Smith",
+            "status": "NORMAL",
+            "event_type": "NORMAL",
+            "face_count": 1,
+            "explanation": "Candidate verified.",
+        },
+    )
+    assert resp1.status_code == 200
+
+    # Station 2 reports NORMAL
+    resp2 = pi_client.post(
+        "/status",
+        headers=headers,
+        json={
+            "device_id": "DESK-02",
+            "candidate_name": "Bob Jones",
+            "status": "NORMAL",
+            "event_type": "NORMAL",
+            "face_count": 1,
+            "explanation": "Candidate verified.",
+        },
+    )
+    assert resp2.status_code == 200
+
+    # Check overall snapshot: both normal -> overall room is NORMAL
+    snap1 = pi_client.get("/api/status").get_json()
+    assert snap1["overall_status"] == "NORMAL"
+    assert snap1["active_count"] == 2
+    assert snap1["alert_count"] == 0
+    assert snap1["nominal_count"] == 2
+    assert len(snap1["workstations"]) == 2
+
+    # Now Station 2 flags an ALERT (face absent)
+    resp_alert = pi_client.post(
+        "/status",
+        headers=headers,
+        json={
+            "device_id": "DESK-02",
+            "candidate_name": "Bob Jones",
+            "status": "ALERT",
+            "event_type": "FACE_ABSENT",
+            "face_count": 0,
+            "explanation": "Candidate left desk for > 5s.",
+        },
+    )
+    assert resp_alert.status_code == 200
+
+    # Overall room status must elevate to ALERT
+    snap2 = pi_client.get("/api/status").get_json()
+    assert snap2["overall_status"] == "ALERT"
+    assert snap2["active_count"] == 2
+    assert snap2["alert_count"] == 1
+    assert snap2["nominal_count"] == 1
+
+    # Station 2 returns to NORMAL
+    resp_restore = pi_client.post(
+        "/status",
+        headers=headers,
+        json={
+            "device_id": "DESK-02",
+            "candidate_name": "Bob Jones",
+            "status": "NORMAL",
+            "event_type": "NORMAL",
+            "face_count": 1,
+            "explanation": "Candidate returned.",
+        },
+    )
+    assert resp_restore.status_code == 200
+
+    # Room status returns to NORMAL
+    snap3 = pi_client.get("/api/status").get_json()
+    assert snap3["overall_status"] == "NORMAL"
+    assert snap3["alert_count"] == 0
+    assert snap3["nominal_count"] == 2
+
+
+def test_pi_workstation_evidence_and_acknowledgement(pi_client):
+    """Workstations send evidence snapshots on alert, and proctors can acknowledge alerts."""
+    headers = {"Authorization": f"Bearer {TEST_TOKEN}"}
+    fake_img = "data:image/jpeg;base64,dummybase64string"
+
+    # Send alert with evidence image
+    resp = pi_client.post(
+        "/status",
+        headers=headers,
+        json={
+            "device_id": "DESK-09",
+            "candidate_name": "Test Student",
+            "status": "ALERT",
+            "event_type": "FACE_ABSENT",
+            "face_count": 0,
+            "explanation": "Student absent.",
+            "evidence_image": fake_img,
+        },
+    )
+    assert resp.status_code == 200
+
+    # Verify evidence stored in snapshot
+    snap = pi_client.get("/api/status").get_json()
+    desk = next(s for s in snap["workstations"] if s["device_id"] == "DESK-09")
+    assert desk["evidence_image"] == fake_img
+    assert desk["acknowledged"] is False
+    assert desk["alert_duration_sec"] >= 0
+
+    # Acknowledge station
+    ack_resp = pi_client.post(
+        "/api/workstation/DESK-09/acknowledge",
+        headers={"X-Proctor-Auth": TEST_TOKEN},
+    )
+    assert ack_resp.status_code == 200
+    assert ack_resp.get_json()["acknowledged"] is True
+
+    # Verify acknowledged flag
+    snap2 = pi_client.get("/api/status").get_json()
+    desk2 = next(s for s in snap2["workstations"] if s["device_id"] == "DESK-09")
+    assert desk2["acknowledged"] is True
+
+
+def test_pi_export_report_and_simulation(pi_client):
+    """Proctor can simulate multi-workstation exam hall and export session audit report."""
+    headers = {"X-Proctor-Auth": TEST_TOKEN}
+
+    # Simulate multi-hall
+    sim_resp = pi_client.post("/api/simulate_multi", headers=headers)
+    assert sim_resp.status_code == 200
+    assert sim_resp.get_json()["simulated_count"] == 4
+
+    snap = pi_client.get("/api/status").get_json()
+    assert snap["active_count"] == 4
+    assert snap["alert_count"] == 2
+
+    # Acknowledge all alerts
+    ack_all_resp = pi_client.post("/api/acknowledge_all", headers=headers)
+    assert ack_all_resp.status_code == 200
+    assert ack_all_resp.get_json()["count"] >= 2
+
+    # Export report
+    report_resp = pi_client.get("/api/export_report")
+    assert report_resp.status_code == 200
+    report = report_resp.get_json()
+    assert "workstations" in report
+    assert "history" in report
+    assert len(report["workstations"]) >= 4
+
+
